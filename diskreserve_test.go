@@ -79,10 +79,8 @@ func TestReservationsAddUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := guard.Reserve(&ReserveArgs{Priority: PriorityLow, Bytes: 4 * gibibyte}); !errors.Is(
-		err,
-		ErrBelowReserve,
-	) {
+	_, err = guard.Reserve(&ReserveArgs{Priority: PriorityLow, Bytes: 4 * gibibyte})
+	if !errors.Is(err, ErrBelowReserve) {
 		t.Fatalf("a second low-priority reservation past the reserve: %v", err)
 	}
 	if err := guard.Require(PriorityLow, 4*gibibyte); !errors.Is(err, ErrBelowReserve) {
@@ -104,7 +102,7 @@ func TestReservationsAddUp(t *testing.T) {
 	second.Release()
 	status, err = guard.Status()
 	if err != nil || status.ReservedBytes != 0 {
-		t.Fatalf("after releasing everything: %+v, %v", status, err)
+		t.Fatalf("after releasing everything: %+v, %v, want 0 reserved bytes", status, err)
 	}
 	if err := first.Grow(1, 0); err == nil {
 		t.Fatal("a released reservation grew")
@@ -215,7 +213,10 @@ func TestStatfs(t *testing.T) {
 		t.Fatal(err)
 	}
 	if status.TotalBytes <= 0 || status.FreeBytes < 0 || status.FreeBytes > status.TotalBytes {
-		t.Fatalf("implausible capacity %+v", status.Capacity)
+		t.Fatalf(
+			"capacity = %+v, want positive total bytes and free bytes within it",
+			status.Capacity,
+		)
 	}
 }
 
@@ -224,8 +225,9 @@ func TestNewGuardArguments(t *testing.T) {
 	if _, err := NewGuard(&NewGuardArgs{}); err == nil {
 		t.Fatal("a guard without a path")
 	}
-	if _, err := NewGuard(&NewGuardArgs{Path: "/", MinimumReserveBytes: 10, MaximumReserveBytes: 5}); err == nil {
-		t.Fatal("a minimum reserve above its maximum")
+	_, err := NewGuard(&NewGuardArgs{Path: "/", MinimumReserveBytes: 10, MaximumReserveBytes: 5})
+	if err == nil {
+		t.Fatal("NewGuard with a minimum reserve above its maximum returned no error, want one")
 	}
 	guard, err := NewGuard(&NewGuardArgs{
 		Path:         "/",
@@ -238,8 +240,13 @@ func TestNewGuardArguments(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := guard.Status()
-	if err != nil || status.ReserveBytes != 7 || status.ReserveInodes != 0 || status.Level != LevelNormal {
-		t.Fatalf("status %+v, %v", status, err)
+	if err != nil || status.ReserveBytes != 7 || status.ReserveInodes != 0 ||
+		status.Level != LevelNormal {
+		t.Fatalf(
+			"Status() = %+v, %v, want a 7-byte reserve, no inode reserve, and LevelNormal",
+			status,
+			err,
+		)
 	}
 	if err := guard.Require("other", 1); err == nil {
 		t.Fatal("an unknown priority was checked")
@@ -265,7 +272,9 @@ func fixedGuard(t *testing.T, capacity Capacity, reserveBytes int64) *Guard {
 // as btrfs, admits inode reservations on its bytes alone.
 func TestNoInodeLimit(t *testing.T) {
 	guard := fixedGuard(t, Capacity{TotalBytes: 100 << 30, FreeBytes: 50 << 30}, 0)
-	reservation, err := guard.Reserve(&ReserveArgs{Priority: PriorityLow, Bytes: 1 << 20, Inodes: 1})
+	reservation, err := guard.Reserve(
+		&ReserveArgs{Priority: PriorityLow, Bytes: 1 << 20, Inodes: 1},
+	)
 	if err != nil {
 		t.Fatalf("an inode reservation without an inode limit: %v", err)
 	}
@@ -280,13 +289,15 @@ func TestHugeReservationsStayExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := guard.Reserve(&ReserveArgs{Priority: PriorityExempt, Bytes: 1}); !errors.Is(err, ErrTooLarge) {
+	_, err = guard.Reserve(&ReserveArgs{Priority: PriorityExempt, Bytes: 1})
+	if !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("a reservation past the largest count: %v", err)
 	}
 	if err := first.Grow(1, 0); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("growing past the largest count: %v", err)
 	}
-	if _, err := guard.Reserve(&ReserveArgs{Priority: PriorityLow, Bytes: math.MaxInt64}); err == nil {
+	_, err = guard.Reserve(&ReserveArgs{Priority: PriorityLow, Bytes: math.MaxInt64})
+	if err == nil {
 		t.Fatal("a huge low-priority write past a huge exempt one was admitted")
 	}
 	if err := guard.Require(PriorityHigh, 1); !errors.Is(err, ErrCritical) {
@@ -300,7 +311,7 @@ func TestHugeReservationsStayExact(t *testing.T) {
 	second.Release()
 	status, err := guard.Status()
 	if err != nil || status.ReservedBytes != 0 {
-		t.Fatalf("after every release %d bytes are reserved: %v", status.ReservedBytes, err)
+		t.Fatalf("after every release %d bytes are reserved, %v, want 0", status.ReservedBytes, err)
 	}
 }
 
@@ -312,7 +323,9 @@ func TestReservePercentRounding(t *testing.T) {
 		ReservePercent:      10,
 		MinimumReserveBytes: 1,
 		MaximumReserveBytes: 100,
-		Measure:             func(string) (Capacity, error) { return Capacity{TotalBytes: 199, FreeBytes: 199}, nil },
+		Measure: func(string) (Capacity, error) {
+			return Capacity{TotalBytes: 199, FreeBytes: 199}, nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

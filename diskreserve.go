@@ -26,12 +26,17 @@ import (
 	"sync"
 )
 
-// Default reserve bounds.
 const (
-	DefaultReservePercent       = 10
-	DefaultMinimumReserveBytes  = 2 << 30
-	DefaultMaximumReserveBytes  = 50 << 30
+	// DefaultReservePercent is the share of the filesystem reserved, before
+	// the clamps, when NewGuardArgs.ReservePercent is zero.
+	DefaultReservePercent = 10
+	// DefaultMinimumReserveBytes is the smallest byte reserve, 2 GiB.
+	DefaultMinimumReserveBytes = 2 << 30
+	// DefaultMaximumReserveBytes is the largest byte reserve, 50 GiB.
+	DefaultMaximumReserveBytes = 50 << 30
+	// DefaultMinimumReserveInodes is the smallest inode reserve.
 	DefaultMinimumReserveInodes = 10_000
+	// DefaultMaximumReserveInodes is the largest inode reserve.
 	DefaultMaximumReserveInodes = 1_000_000
 )
 
@@ -74,10 +79,15 @@ const (
 // Capacity is one measurement of a filesystem. Free counts what an
 // unprivileged process may use.
 type Capacity struct {
-	TotalBytes  int64
-	FreeBytes   int64
+	// TotalBytes is the size of the filesystem.
+	TotalBytes int64
+	// FreeBytes is the space an unprivileged process may still write.
+	FreeBytes int64
+	// TotalInodes is the filesystem's inode count, 0 when it reports no
+	// inode limit.
 	TotalInodes int64
-	FreeInodes  int64
+	// FreeInodes is the inodes an unprivileged process may still use.
+	FreeInodes int64
 }
 
 // Measure measures the filesystem holding path.
@@ -87,12 +97,20 @@ type Measure func(path string) (Capacity, error)
 // reservations held.
 type Status struct {
 	Capacity
-	Level         Level
-	ReserveBytes  int64
+	// Level is the pressure after the reserved bytes and inodes are counted
+	// as used.
+	Level Level
+	// ReserveBytes is the free space the guard keeps, as computed for this
+	// measurement.
+	ReserveBytes int64
+	// ReserveInodes is the free inodes the guard keeps, 0 on a filesystem
+	// that reports no inode limit.
 	ReserveInodes int64
-	// ReservedBytes and ReservedInodes are held by writes in flight; the
-	// level counts them as used.
-	ReservedBytes  int64
+	// ReservedBytes is held by writes in flight; the level counts it as
+	// used.
+	ReservedBytes int64
+	// ReservedInodes is held by writes in flight; the level counts it as
+	// used.
 	ReservedInodes int64
 }
 
@@ -105,13 +123,17 @@ type NewGuardArgs struct {
 	// ReservePercent is the share of the filesystem reserved, before the
 	// clamps, 1 to 100. Zero uses DefaultReservePercent.
 	ReservePercent int64
-	// MinimumReserveBytes and MaximumReserveBytes clamp the byte reserve.
-	// Zero or negative uses the defaults.
+	// MinimumReserveBytes is the smallest computed byte reserve. Zero or
+	// negative uses DefaultMinimumReserveBytes.
 	MinimumReserveBytes int64
+	// MaximumReserveBytes is the largest computed byte reserve. Zero or
+	// negative uses DefaultMaximumReserveBytes.
 	MaximumReserveBytes int64
-	// MinimumReserveInodes and MaximumReserveInodes clamp the inode reserve.
-	// Zero or negative uses the defaults.
+	// MinimumReserveInodes is the smallest inode reserve. Zero or negative
+	// uses DefaultMinimumReserveInodes.
 	MinimumReserveInodes int64
+	// MaximumReserveInodes is the largest inode reserve. Zero or negative
+	// uses DefaultMaximumReserveInodes.
 	MaximumReserveInodes int64
 	// Measure replaces the statfs system call, as in tests. Nil uses statfs.
 	Measure Measure
@@ -164,9 +186,10 @@ func NewGuard(args *NewGuardArgs) (*Guard, error) {
 	return guard, nil
 }
 
-func positiveOr(value, fallback int64) int64 {
-	if value > 0 {
-		return value
+// positiveOr returns amount when it is positive, and fallback otherwise.
+func positiveOr(amount, fallback int64) int64 {
+	if amount > 0 {
+		return amount
 	}
 	return fallback
 }
@@ -193,12 +216,12 @@ func (g *Guard) statusLocked() (*Status, error) {
 	status.ReserveBytes = g.reserveBytes
 	if status.ReserveBytes <= 0 {
 		status.ReserveBytes = min(
-			max(percentOf(capacity.TotalBytes, g.reservePercent), g.minimumReserveBytes),
+			max(percentage(capacity.TotalBytes, g.reservePercent), g.minimumReserveBytes),
 			g.maximumReserveBytes,
 		)
 	}
 	status.ReserveInodes = min(
-		max(percentOf(capacity.TotalInodes, g.reservePercent), g.minimumReserveInodes),
+		max(percentage(capacity.TotalInodes, g.reservePercent), g.minimumReserveInodes),
 		g.maximumReserveInodes,
 	)
 	if capacity.TotalInodes == 0 {
@@ -209,9 +232,9 @@ func (g *Guard) statusLocked() (*Status, error) {
 	return status, nil
 }
 
-// percentOf is percent of total, rounded down, without overflowing or
+// percentage is percent of total, rounded down, without overflowing or
 // truncating total before multiplying. percent is 1 to 100.
-func percentOf(total, percent int64) int64 {
+func percentage(total, percent int64) int64 {
 	return total/100*percent + total%100*percent/100
 }
 
@@ -230,7 +253,10 @@ func pressureLevel(status *Status, incomingBytes int64, incomingInodes int64) Le
 	free := status.FreeBytes - saturatingAdd(status.ReservedBytes, max(incomingBytes, 0))
 	freeInodes := int64(math.MaxInt64)
 	if status.TotalInodes > 0 {
-		freeInodes = status.FreeInodes - saturatingAdd(status.ReservedInodes, max(incomingInodes, 0))
+		freeInodes = status.FreeInodes - saturatingAdd(
+			status.ReservedInodes,
+			max(incomingInodes, 0),
+		)
 	}
 	switch {
 	case free < status.ReserveBytes/4 || freeInodes < status.ReserveInodes/4:
@@ -278,8 +304,9 @@ func (g *Guard) Require(priority Priority, bytes int64) error {
 type ReserveArgs struct {
 	// Priority decides the level that refuses the reservation. Required.
 	Priority Priority
-	// Bytes and Inodes are the most the write will add; negative counts as 0.
-	Bytes  int64
+	// Bytes is the most space the write will add; negative counts as 0.
+	Bytes int64
+	// Inodes is the most inodes the write will add; negative counts as 0.
 	Inodes int64
 }
 
