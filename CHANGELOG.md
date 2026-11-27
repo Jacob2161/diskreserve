@@ -1,0 +1,22 @@
+# Changelog
+
+This module follows semantic versioning. Before v1, a minor version may
+change the API; each such change says what callers must do.
+
+## Unreleased
+
+- Every exported default, `Capacity` and `Status` field, and argument has
+  its own doc comment with its unit and default. No API change.
+- CI also checks formatting, `go mod tidy -diff`, and `govulncheck`.
+
+## v0.1.0 (2026-11-27)
+
+First release.
+
+- `Guard` keeps a reserve of free space and inodes on one filesystem: 10%
+  by default, clamped to [2 GiB, 50 GiB] and [10,000, 1,000,000] inodes.
+- Writes are admitted by priority: `PriorityLow` is refused below the
+  reserve, `PriorityHigh` only below a quarter of it, and `PriorityExempt`
+  never, though it is counted against the others.
+- `Reserve` holds space for a write in flight, so concurrent writers that
+  each fit cannot together run past the reserve.
