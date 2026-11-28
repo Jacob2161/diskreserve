@@ -39,4 +39,4 @@ defer upload.Release()
   that reports no inode limit (btrfs) is judged on bytes alone.
 - Measures with statfs on Linux, macOS, FreeBSD, and DragonFly; elsewhere, pass your own `Measure`.
 
-Tested on the two newest Go releases. Licensed under the MIT license.
+Requires Go 1.27. Licensed under the MIT license.

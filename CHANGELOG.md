@@ -3,6 +3,11 @@
 This module follows semantic versioning. Before v1, a minor version may
 change the API; each such change says what callers must do.
 
+## v0.2.1 (2026-11-28)
+
+- The README says the module requires Go 1.27.
+- Tagged so the module proxy serves this release; v0.2.0 is the same code.
+
 ## v0.2.0 (2026-11-28)
 
 - Requires Go 1.27, the newest Go release; Go 1.26 is no longer
